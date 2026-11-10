@@ -81,7 +81,8 @@ input.cod{width:100%;margin-top:6px;padding:14px;border-radius:12px;border:1px s
     getMeusVotos: ['meus', 'jurado', 'codigo'],
     salvarVoto: ['votar', 'jurado', 'projeto', 'nota', 'codigo'],
     cadastrarJurado: ['cadastrar', 'nome', 'codigo'],
-    adminLista: ['admin_lista', 'senha'],
+    adminEstado: ['admin_estado', 'senha'],
+    adminAcao: ['admin_acao', 'senha', 'acao2'],
     adminApagar: ['admin_apagar', 'senha', 'jurado']
   };
   function call(fn, args, ok, fail) {
@@ -118,7 +119,7 @@ input.cod{width:100%;margin-top:6px;padding:14px;border-radius:12px;border:1px s
     h += '<div class="names">' + i.jurados.map(function (n, k) { return '<button class="name" data-k="' + k + '">' + esc(n) + '</button>'; }).join('') + '</div>';
     if (i.permiteNovo) { h += '<button class="link novo" id="novo">Meu nome não está na lista</button>'; }
     if (erro) { h += '<div class="state err">' + esc(erro) + '</div>'; }
-    h += '</div><button class="link novo" id="adm" style="opacity:.55;font-size:12px">Área de testes</button>';
+    h += '</div><button class="link novo" id="adm" style="opacity:.55;font-size:12px">Administração</button>';
     app.innerHTML = h;
     document.getElementById('adm').onclick = function () { telaAdminLogin(); };
     if (i.permiteNovo) { document.getElementById('novo').onclick = function () { if (i.exigeCodigo) { S.code = document.getElementById('cod').value; } telaCadastro(); }; }
@@ -130,9 +131,9 @@ input.cod{width:100%;margin-top:6px;padding:14px;border-radius:12px;border:1px s
     });
   }
 
-  // ---- Área de testes (senha conferida no servidor): ver quem votou e apagar as notas de um jurado ----
+  // ---- Administração (senha conferida no servidor): controlar a votação e apagar notas de teste ----
   function telaAdminLogin(erro) {
-    var h = '<div class="card"><h2>Área de testes</h2><div class="ap" style="color:var(--mut)">Digite a senha para ver quem já votou e apagar notas.</div>' +
+    var h = '<div class="card"><h2>Administração</h2><div class="ap" style="color:var(--mut)">Digite a senha para controlar a votação.</div>' +
       '<label class="cod">Senha<input class="cod" id="admSenha" type="password" autocomplete="off"></label>' +
       '<div class="names" style="margin-top:14px"><button class="name" id="admOk">Entrar</button></div><button class="link novo" id="admVolta">Voltar</button>';
     if (erro) { h += '<div class="state err">' + esc(erro) + '</div>'; }
@@ -140,29 +141,51 @@ input.cod{width:100%;margin-top:6px;padding:14px;border-radius:12px;border:1px s
     document.getElementById('admVolta').onclick = function () { telaNomes(); };
     var campo = document.getElementById('admSenha'), entrarAdm = function () {
       var b = document.getElementById('admOk'); b.textContent = 'Conferindo…'; b.disabled = true; S.adm = campo.value;
-      call('adminLista', [S.adm], function (l) { telaAdmin(l); }, function (e) { S.adm = ''; telaAdminLogin(msg(e)); });
+      call('adminEstado', [S.adm], function (e) { telaAdmin(e); }, function (e) { S.adm = ''; telaAdminLogin(msg(e)); });
     };
     document.getElementById('admOk').onclick = entrarAdm;
     campo.onkeydown = function (ev) { if (ev.key === 'Enter') { entrarAdm(); } };
   }
-  function telaAdmin(lista, aviso) {
-    var h = '<div class="card"><h2>Quem já votou</h2><div class="ap" style="color:var(--mut)">Apagar as notas de um jurado libera ele para votar de novo.</div>';
+  function telaAdmin(est, aviso) {
+    var lista = est.lista || [];
+    var btn = 'min-height:44px;padding:0 14px;font-size:15px;width:100%;margin-top:8px';
+    var h = '<div class="card"><h2>Controle da votação</h2><ul class="resumo">' +
+      '<li><span>Votação</span><b>' + (est.aberta ? 'ABERTA' : 'ENCERRADA') + '</b></li>' +
+      '<li><span>Placar ao vivo no telão</span><b>' + (est.aoVivo ? 'LIGADO' : 'desligado') + '</b></li>' +
+      '<li><span>Resultado final no telão</span><b>' + (est.liberado ? 'LIBERADO' : 'oculto') + '</b></li></ul>' +
+      (est.aberta ? '<button class="chip" data-a="encerrar" style="' + btn + '">Encerrar votação</button>' : '<button class="chip" data-a="abrir" style="' + btn + '">Reabrir votação</button>') +
+      '<button class="chip" data-a="' + (est.aoVivo ? 'aovivo_off' : 'aovivo_on') + '" style="' + btn + '">' + (est.aoVivo ? 'Desligar placar ao vivo' : 'Ligar placar ao vivo') + '</button>' +
+      (est.liberado ? '<button class="chip" data-a="ocultar" style="' + btn + '">Ocultar resultado do telão</button>' :
+        (est.aberta ? '<div class="cnt" style="margin-top:8px">Para liberar o resultado final, encerre a votação antes.</div>' : '<button class="chip sel" data-a="liberar" style="' + btn + '">Liberar resultado no telão</button>')) +
+      '</div>';
+    h += '<div class="card"><h2>Quem já votou</h2><div class="ap" style="color:var(--mut)">Apagar as notas de um jurado libera ele para votar de novo.</div>';
     if (!lista.length) { h += '<div class="state">Nenhum voto registrado.</div>'; }
     lista.forEach(function (j, k) {
       h += '<div style="border-top:1px solid var(--line);padding:10px 0"><div style="display:flex;justify-content:space-between;gap:10px;align-items:center"><div><b>' + esc(j.jurado) + '</b><div class="cnt" style="margin:2px 0 0">' + j.votos + (j.votos === 1 ? ' nota' : ' notas') + ': ' +
-        j.notas.map(function (n) { return esc(n.id) + '=' + fmt(n.nota); }).join(' · ') + '</div></div><button class="chip" style="min-height:40px;padding:0 14px;font-size:14px" data-k="' + k + '">Apagar</button></div></div>';
+        j.notas.map(function (n) { return esc(n.id) + '=' + fmt(n.nota); }).join(' · ') + '</div></div><button class="chip" data-k="' + k + '" style="min-height:40px;padding:0 14px;font-size:14px">Apagar</button></div></div>';
     });
     if (lista.length) { h += '<button class="link novo" id="admTodos" style="color:#ff8a8a">Apagar os votos de todos</button>'; }
     if (aviso) { h += '<div class="state ok">' + esc(aviso) + '</div>'; }
-    h += '<button class="link novo" id="admSai">Sair da área de testes</button></div>';
+    h += '<button class="link novo" id="admSai">Sair da administração</button></div>';
     app.innerHTML = h;
+    var ok = function (e, m) { S.init.aberta = e.aberta; telaAdmin(e, m); };
     var apagar = function (nome, rotulo) {
       if (!window.confirm('Apagar ' + rotulo + '? Não dá para desfazer.')) { return; }
-      call('adminApagar', [S.adm, nome], function (l) { telaAdmin(l, 'Apagado. ' + (nome === '*' ? 'Todos podem votar de novo.' : nome + ' pode votar de novo.')); }, function (e) { toast(msg(e)); });
+      call('adminApagar', [S.adm, nome], function (e) { ok(e, 'Apagado. ' + (nome === '*' ? 'Todos podem votar de novo.' : nome + ' pode votar de novo.')); }, function (e) { toast(msg(e)); });
     };
-    [].forEach.call(app.querySelectorAll('.chip'), function (b) { b.onclick = function () { var j = lista[+b.getAttribute('data-k')]; apagar(j.jurado, 'as notas de ' + j.jurado); }; });
+    var CONF = { encerrar: 'Encerrar a votação? Ninguém mais conseguirá votar.', abrir: 'Reabrir a votação? O resultado final volta a ficar oculto.', liberar: 'Liberar o resultado final no telão?' };
+    var MSG = { encerrar: 'Votação encerrada.', abrir: 'Votação reaberta.', aovivo_on: 'Placar ao vivo ligado.', aovivo_off: 'Placar ao vivo desligado.', liberar: 'Resultado liberado no telão.', ocultar: 'Resultado oculto.' };
+    [].forEach.call(app.querySelectorAll('.chip[data-a]'), function (b) {
+      b.onclick = function () {
+        var a = b.getAttribute('data-a');
+        if (CONF[a] && !window.confirm(CONF[a])) { return; }
+        b.disabled = true; b.textContent = 'Aguarde…';
+        call('adminAcao', [S.adm, a], function (e) { ok(e, MSG[a]); }, function (e) { toast(msg(e)); telaAdmin(est); });
+      };
+    });
+    [].forEach.call(app.querySelectorAll('.chip[data-k]'), function (b) { b.onclick = function () { var j = lista[+b.getAttribute('data-k')]; apagar(j.jurado, 'as notas de ' + j.jurado); }; });
     var t = document.getElementById('admTodos'); if (t) { t.onclick = function () { apagar('*', 'os votos de TODOS os jurados'); }; }
-    document.getElementById('admSai').onclick = function () { S.adm = ''; telaNomes(); };
+    document.getElementById('admSai').onclick = function () { S.adm = ''; start(); };
   }
 
   function telaCadastro(erro) {
@@ -188,7 +211,8 @@ input.cod{width:100%;margin-top:6px;padding:14px;border-radius:12px;border:1px s
   }
 
   function telaFechada() {
-    app.innerHTML = '<div class="card fechada"><div class="big">Votação encerrada</div><div>Obrigado! Os votos já foram registrados.</div></div>';
+    app.innerHTML = '<div class="card fechada"><div class="big">Votação encerrada</div><div>Obrigado! Os votos já foram registrados.</div></div><button class="link novo" id="adm" style="opacity:.55;font-size:12px">Administração</button>';
+    document.getElementById('adm').onclick = function () { telaAdminLogin(); };
   }
 
   function entrar(nome) {
